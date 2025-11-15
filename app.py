@@ -1,7 +1,6 @@
 """
-LBSK Forecasting System - Streamlit App (COMPLETE & FIXED)
+LBSK Forecasting System - Streamlit App (FIXED RECURSIVE FORECAST)
 Upload Excel/CSV untuk auto-generate forecast 6 bulan ke depan
-Chart Style: Tableau (Actual Blue + Forecast Orange)
 """
 import streamlit as st
 import pandas as pd
@@ -10,10 +9,8 @@ import joblib
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import warnings
-import traceback
 warnings.filterwarnings('ignore')
 
-# Page config
 st.set_page_config(
     page_title="Labskill Forecasting System",
     page_icon="🚀",
@@ -21,7 +18,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -33,14 +29,12 @@ st.markdown("""
         text-align: center;
         margin-bottom: 1rem;
     }
-    
     .sub-header {
         font-size: 1.2rem;
         text-align: center;
         color: #666;
         margin-bottom: 2rem;
     }
-    
     .upload-section {
         background: #f0f7ff;
         padding: 20px;
@@ -48,7 +42,6 @@ st.markdown("""
         border: 2px dashed #667eea;
         margin: 20px 0;
     }
-    
     .improvement {
         color: #10b981;
         font-weight: bold;
@@ -56,7 +49,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Feature names
 REQUIRED_FEATURES = [
     'Avg_Harga',
     'Total_Referrals',
@@ -68,9 +60,6 @@ REQUIRED_FEATURES = [
     'Completion_Revenue_Interaction'
 ]
 
-# ============================================================================
-# LOAD MODELS
-# ============================================================================
 @st.cache_resource
 def load_models():
     """Load trained models"""
@@ -85,9 +74,6 @@ def load_models():
         st.error(f"❌ Error: {e}")
         return None, None, False
 
-# ============================================================================
-# GENERATE ACTUAL DATA
-# ============================================================================
 def generate_actual_data():
     """Generate actual training data (Sep 2023 - Jul 2025)"""
     np.random.seed(42)
@@ -111,61 +97,94 @@ def generate_actual_data():
     return actual_dates, actual_revenue, actual_peserta
 
 # ============================================================================
-# RECURSIVE FORECAST
+# FIXED RECURSIVE FORECAST - MULTI-STEP APPROACH
 # ============================================================================
 def recursive_forecast_peserta(model, df_input, n_months=6):
-    """Forecast peserta - revenue rolling tetap"""
+    """
+    FIXED: Create new DataFrame for each prediction step
+    Pipeline expects DataFrame with proper column names
+    """
     forecast = []
-    last_row = df_input.iloc[-1]
-    original_revenue_roll3 = last_row['Total_Revenue_roll_max3']
-    original_revenue_roll6 = last_row['Total_Revenue_roll_max6']
     
-    row = last_row.values.reshape(1, -1)
+    # Start with last known values
+    current_features = df_input.iloc[-1].copy()
     
     for i in range(n_months):
-        pred = model.predict(row)[0]
+        # Create DataFrame with single row (pipeline expects this)
+        input_df = pd.DataFrame([current_features], columns=REQUIRED_FEATURES)
+        
+        # Predict
+        pred = model.predict(input_df)[0]
         pred = max(0, pred)
         forecast.append(int(pred))
         
-        row[0][2] = (row[0][2] * 2 + pred) / 3
-        row[0][3] = (row[0][3] * 5 + pred) / 6
-        row[0][4] = original_revenue_roll3
-        row[0][5] = original_revenue_roll6
-        row[0][6] = original_revenue_roll3 / max(pred, 1)
-        row[0][7] = min(0.95, row[0][7] * 0.98 + 0.02)
+        # ✅ FIXED: Update features properly maintaining original scale
+        # Update peserta rolling (using ORIGINAL scale values)
+        current_features['Jumlah_Peserta_roll_max3'] = (
+            current_features['Jumlah_Peserta_roll_max3'] * 0.66 + pred * 0.34
+        )
+        current_features['Jumlah_Peserta_roll_max6'] = (
+            current_features['Jumlah_Peserta_roll_max6'] * 0.83 + pred * 0.17
+        )
+        
+        # Revenue rolling stays constant (use last known)
+        # (already in current_features, no change needed)
+        
+        # Update dependent features
+        current_features['Revenue_per_User'] = (
+            current_features['Total_Revenue_roll_max3'] / max(pred, 1)
+        )
+        current_features['Completion_Revenue_Interaction'] = min(
+            0.95, 
+            current_features['Completion_Revenue_Interaction'] * 0.98 + 0.015
+        )
     
     start = datetime(2025, 9, 1)
     months = [(start + timedelta(days=30*i)).strftime('%Y-%m') for i in range(n_months)]
     return months, forecast
 
 def recursive_forecast_revenue(model, df_input, n_months=6):
-    """Forecast revenue - peserta rolling tetap"""
+    """
+    FIXED: Create new DataFrame for each prediction step
+    """
     forecast = []
-    last_row = df_input.iloc[-1]
-    original_peserta_roll3 = last_row['Jumlah_Peserta_roll_max3']
-    original_peserta_roll6 = last_row['Jumlah_Peserta_roll_max6']
     
-    row = last_row.values.reshape(1, -1)
+    # Start with last known values
+    current_features = df_input.iloc[-1].copy()
     
     for i in range(n_months):
-        pred = model.predict(row)[0]
+        # Create DataFrame (pipeline expects this format)
+        input_df = pd.DataFrame([current_features], columns=REQUIRED_FEATURES)
+        
+        # Predict
+        pred = model.predict(input_df)[0]
         pred = max(0, pred)
         forecast.append(pred)
         
-        row[0][4] = (row[0][4] * 2 + pred) / 3
-        row[0][5] = (row[0][5] * 5 + pred) / 6
-        row[0][2] = original_peserta_roll3
-        row[0][3] = original_peserta_roll6
-        row[0][6] = pred / max(original_peserta_roll3, 1)
-        row[0][7] = min(0.95, row[0][7] * 0.98 + 0.02)
+        # ✅ FIXED: Update revenue rolling maintaining scale
+        current_features['Total_Revenue_roll_max3'] = (
+            current_features['Total_Revenue_roll_max3'] * 0.66 + pred * 0.34
+        )
+        current_features['Total_Revenue_roll_max6'] = (
+            current_features['Total_Revenue_roll_max6'] * 0.83 + pred * 0.17
+        )
+        
+        # Peserta rolling stays constant
+        # (already in current_features)
+        
+        # Update dependent features
+        current_features['Revenue_per_User'] = (
+            pred / max(current_features['Jumlah_Peserta_roll_max3'], 1)
+        )
+        current_features['Completion_Revenue_Interaction'] = min(
+            0.95,
+            current_features['Completion_Revenue_Interaction'] * 0.98 + 0.015
+        )
     
     start = datetime(2025, 9, 1)
     months = [(start + timedelta(days=30*i)).strftime('%Y-%m') for i in range(n_months)]
     return months, forecast
 
-# ============================================================================
-# VALIDATE INPUT
-# ============================================================================
 def validate_input_data(df, features):
     """Validate uploaded data"""
     if df.empty:
@@ -244,7 +263,7 @@ if page == "🏠 Home":
     st.info("""
     1. Pilih halaman Revenue atau Peserta
     2. Upload Excel/CSV dengan 8 features
-    3. Lihat forecast 6 bulan (Sep 2025 - Mar 2026)
+    3. Lihat forecast 6 bulan (Sep 2025 - Feb 2026)
     4. Download hasil CSV
     """)
     
@@ -300,6 +319,9 @@ elif page == "💰 Revenue Forecast":
             
         except Exception as e:
             st.error(f"❌ Error: {e}")
+            import traceback
+            if st.checkbox("Show debug"):
+                st.code(traceback.format_exc())
             st.stop()
     else:
         st.info("👆 Upload file untuk mulai")
@@ -408,6 +430,9 @@ elif page == "👥 Peserta Forecast":
             
         except Exception as e:
             st.error(f"❌ Error: {e}")
+            import traceback
+            if st.checkbox("Show debug"):
+                st.code(traceback.format_exc())
             st.stop()
     else:
         st.info("👆 Upload file untuk mulai")
