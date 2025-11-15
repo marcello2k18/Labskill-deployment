@@ -544,7 +544,11 @@ elif page == "💰 Revenue Forecast":
         )
         
         # Download forecast
-        csv_forecast = forecast_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Forecast Results (CSV)",
-            data=csv_forecast,
+csv_forecast = forecast_df.to_csv(index=False).encode('utf-8')
+
+st.download_button(
+    label="📥 Download Forecast Results (CSV)",
+    data=csv_forecast,
+    file_name="forecast_results.csv",
+    mime="text/csv"
+)
