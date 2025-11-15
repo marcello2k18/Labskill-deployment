@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 @st.cache_resource
 def load_models():
     try:
-        artifact_p = joblib.load("858a0792-922b-48a6-ae6c-6a193e16959f.joblib")
-        artifact_r = joblib.load("a6d64db9-3902-4f1c-b5ec-57fbc545fc89.joblib")
+        artifact_p = joblib.load("xgboost_peserta_pipeline.joblib")
+        artifact_r = joblib.load("xgb_revenue_optuna_best.joblib")
         return artifact_p, artifact_r
     except FileNotFoundError as e:
         st.error(f"Model file tidak ditemukan: {e}")
@@ -30,7 +30,7 @@ features_r = artifact_r["selected_features"]
 # Load Historical Dataset
 # ============================
 try:
-    df_hist = pd.read_excel("2ac25940-83c4-497c-8d68-6678dbf6c89f.xlsx")
+    df_hist = pd.read_excel("LBSK2025-FORECAST.xlsx")
 except FileNotFoundError:
     st.error("File historis tidak ditemukan")
     st.stop()
