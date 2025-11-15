@@ -69,9 +69,10 @@ st.markdown("""
 def load_models():
     """Load trained models"""
     try:
-        peserta_pipeline = joblib.load('xgb_peserta_optuna_best.joblib') 
+        # IMPORTANT: Pakai model yang benar - xgb_peserta_optuna_best.joblib (bukan pipeline)
+        peserta_model = joblib.load('xgb_peserta_optuna_best.joblib')
         revenue_model = joblib.load('xgb_revenue_optuna_best.joblib')
-        return peserta_pipeline, revenue_model, True
+        return peserta_model, revenue_model, True
     except Exception as e:
         st.error(f"Error loading models: {e}")
         return None, None, False
@@ -117,15 +118,15 @@ def generate_actual_data():
 
 
 # Generate forecast for 6 months
-def generate_forecast(model, features_df, model_type='revenue', pipeline=None):
+def generate_forecast(model, features_df, model_type='revenue'):
     """
     Generate forecast untuk 6 bulan ke depan
+    Model sudah trained dengan 8 features, langsung predict tanpa scaling
     
     Args:
-        model: XGBoost model
+        model: XGBoost model (revenue atau peserta)
         features_df: DataFrame dengan 8 features untuk starting point
         model_type: 'revenue' atau 'peserta'
-        pipeline: Pipeline untuk peserta (jika ada scaler)
     """
     forecast_values = []
     forecast_months = ['2025-09', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03']
@@ -147,21 +148,8 @@ def generate_forecast(model, features_df, model_type='revenue', pipeline=None):
         features_month[0][6] *= (1 + i * 0.018)  # Revenue_per_User
         features_month[0][7] += i * 0.005  # Completion_Revenue_Interaction
         
-        # Predict
-        if model_type == 'peserta' and isinstance(pipeline, dict):
-            model_obj = pipeline.get('model')
-            scaler = pipeline.get('scaler')
-            
-            if model_obj and scaler:
-                features_scaled = scaler.transform(features_month)
-                prediction = model_obj.predict(features_scaled)[0]
-            elif model_obj:
-                prediction = model_obj.predict(features_month)[0]
-            else:
-                prediction = 0
-        else:
-            prediction = model.predict(features_month)[0]
-        
+        # Predict - SIMPLE! Model langsung support 8 features
+        prediction = model.predict(features_month)[0]
         forecast_values.append(prediction)
     
     return forecast_months, forecast_values
@@ -307,7 +295,7 @@ elif page == "💰 Revenue Forecast":
     st.markdown('<p class="sub-header">Upload data untuk auto-generate revenue forecast 6 bulan</p>', unsafe_allow_html=True)
     
     # Load model
-    peserta_pipeline, revenue_model, models_loaded = load_models()
+    peserta_model, revenue_model, models_loaded = load_models()
     
     if not models_loaded or revenue_model is None:
         st.error("⚠️ Model tidak dapat dimuat.")
@@ -479,9 +467,9 @@ elif page == "👥 Peserta Forecast":
     st.markdown('<p class="sub-header">Upload data untuk auto-generate peserta forecast 6 bulan</p>', unsafe_allow_html=True)
     
     # Load model
-    peserta_pipeline, revenue_model, models_loaded = load_models()
+    peserta_model, revenue_model, models_loaded = load_models()
     
-    if not models_loaded or peserta_pipeline is None:
+    if not models_loaded or peserta_model is None:
         st.error("⚠️ Model tidak dapat dimuat.")
         st.stop()
     
@@ -520,10 +508,9 @@ elif page == "👥 Peserta Forecast":
             # Generate forecast
             with st.spinner('🔮 Generating forecast...'):
                 forecast_months, forecast_values = generate_forecast(
-                    None,
+                    peserta_model,
                     df_input[REQUIRED_FEATURES],
-                    model_type='peserta',
-                    pipeline=peserta_pipeline
+                    model_type='peserta'
                 )
                 # Convert to int
                 forecast_values = [int(v) for v in forecast_values]
