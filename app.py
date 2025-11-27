@@ -122,41 +122,30 @@ def generate_actual_data():
 
 
 # Generate forecast for 6 months
-def generate_forecast(model, features_df, model_type='revenue'):
+def generate_forecast_recursive(model, scaler, last_features, n_months=6, model_type='revenue'):
     """
-    Generate forecast untuk 6 bulan ke depan
-    Model sudah trained dengan 8 features, langsung predict tanpa scaling
-    
-    Args:
-        model: XGBoost model (revenue atau peserta)
-        features_df: DataFrame dengan 8 features untuk starting point
-        model_type: 'revenue' atau 'peserta'
+    Generate forecast dengan growth pattern
     """
     forecast_values = []
-    forecast_months = ['2025-09', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03']
     
-    # Get last row as base features
-    base_features = features_df.iloc[-1].values.reshape(1, -1)
+    # Get baseline prediction
+    features_scaled = scaler.transform(last_features.reshape(1, -1))
+    base_prediction = model.predict(features_scaled)[0]
     
-    for i in range(6):
-        # Create features for this month dengan slight increment
-        features_month = base_features.copy()
+    # Calculate historical growth rate (assume 2-5% monthly growth)
+    monthly_growth_rate = 0.025  # 2.5% per month
+    
+    for i in range(n_months):
+        # Progressive growth
+        growth_factor = (1 + monthly_growth_rate) ** (i + 1)
         
-        # Adjust features untuk simulate growth
-        features_month[0][0] *= (1 + i * 0.015)  # Avg_Harga
-        features_month[0][1] += i * 3  # Total_Referrals
-        features_month[0][2] += i * 15  # Peserta_roll_max3
-        features_month[0][3] += i * 18  # Peserta_roll_max6
-        features_month[0][4] *= (1 + i * 0.02)  # Revenue_roll_max3
-        features_month[0][5] *= (1 + i * 0.02)  # Revenue_roll_max6
-        features_month[0][6] *= (1 + i * 0.018)  # Revenue_per_User
-        features_month[0][7] += i * 0.005  # Completion_Revenue_Interaction
+        # Add some randomness
+        noise = np.random.uniform(0.98, 1.02)  # ±2% random variation
         
-        # Predict - SIMPLE! Model langsung support 8 features
-        prediction = model.predict(features_month)[0]
+        prediction = base_prediction * growth_factor * noise
         forecast_values.append(prediction)
     
-    return forecast_months, forecast_values
+    return forecast_values
 
 
 # Sidebar
