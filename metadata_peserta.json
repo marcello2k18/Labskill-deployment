@@ -1,0 +1,44 @@
+{
+    "features": [
+        "Avg_Harga",
+        "Total_Referrals",
+        "Jumlah_Peserta_roll_max3",
+        "Jumlah_Peserta_roll_max6",
+        "Total_Revenue_roll_max3",
+        "Total_Revenue_roll_max6",
+        "Revenue_per_User",
+        "Completion_Revenue_Interaction"
+    ],
+    "target": "Jumlah_Peserta",
+    "test_size": 3,
+    "train_r2": 0.9640287756919861,
+    "test_r2": 0.9276273250579834,
+    "test_mae": 13.314677238464355,
+    "test_rmse": 16.391938512371237,
+    "test_mape": 1.7782201990485191,
+    "best_params": {
+        "n_estimators": 200,
+        "learning_rate": 0.01127489622676782,
+        "max_depth": 7,
+        "subsample": 0.8519287096572301,
+        "colsample_bytree": 0.7956954221090619,
+        "gamma": 0.02052129172015993,
+        "reg_alpha": 0.1609065082639416,
+        "reg_lambda": 0.7339773482323084,
+        "min_child_weight": 3,
+        "random_state": 42,
+        "n_jobs": -1
+    },
+    "training_date": "2025-11-26 21:58:07",
+    "model_type": "XGBoost Optuna",
+    "median_values": {
+        "Avg_Harga": 1024011.2496256364,
+        "Total_Referrals": 123.0,
+        "Jumlah_Peserta_roll_max3": 596.0,
+        "Jumlah_Peserta_roll_max6": 612.0,
+        "Total_Revenue_roll_max3": 611679000.0,
+        "Total_Revenue_roll_max6": 637572000.0,
+        "Revenue_per_User": 1024011.2496256364,
+        "Completion_Revenue_Interaction": 27.16167398716896
+    }
+}
