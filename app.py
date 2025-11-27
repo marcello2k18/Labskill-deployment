@@ -193,7 +193,7 @@ Required columns:
 # PAGE: HOME
 # ============================================================================
 if page == "🏠 Home":
-    st.markdown('<h1 class="main-header">AI-Powered Forecasting</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">Machine Learning-Powered Forecasting</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Upload CSV to generate 6-month forecast</p>', unsafe_allow_html=True)
     
     st.markdown("---")
