@@ -70,11 +70,13 @@ def load_models():
     """Load trained models"""
     try:
         # IMPORTANT: Pakai model yang benar - xgb_peserta_optuna_best.joblib (bukan pipeline)
-          peserta_model = joblib.load('xgb_peserta_optuna_best__1_.joblib')
+        peserta_model = joblib.load('xgb_peserta_optuna_best__1_.joblib')
         revenue_model = joblib.load('xgb_revenue_optuna_best__1_.joblib')
         scaler_peserta = joblib.load('scaler_peserta.joblib')
         scaler_revenue = joblib.load('scaler_revenue.joblib')
+
         return peserta_model, revenue_model, True
+
     except Exception as e:
         st.error(f"Error loading models: {e}")
         return None, None, False
