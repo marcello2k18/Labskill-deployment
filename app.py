@@ -1,6 +1,5 @@
 """
 LBSK Forecasting System - Streamlit App
-Hanya menggunakan data dari CSV upload user (tanpa data training/hardcoded)
 """
 import streamlit as st
 import pandas as pd
@@ -107,83 +106,128 @@ def generate_future_months(last_date, n_months=6):
     return future_dates
 
 def generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_revenue, n_months=6, target='revenue'):
+    """
+    HYBRID FORECASTING: Trend-based + Model adjustment
+    Gunakan historical trend sebagai baseline, lalu adjust dengan model prediction
+    """
     extended_df = df.copy()
     extended_df['Date'] = pd.to_datetime(extended_df['Date'])
     future_dates = generate_future_months(extended_df['Date'].iloc[-1], n_months)
-    forecast_peserta = []
-    forecast_revenue = []
     
-    # Ambil nilai terakhir untuk stabilisasi
+    # ========================================================================
+    # STEP 1: Hitung Historical Trend (Last 12 bulan atau semua data)
+    # ========================================================================
+    trend_window = min(12, len(extended_df))
+    recent_data = extended_df.tail(trend_window)
+    
+    # Linear regression untuk trend
+    x_trend = np.arange(len(recent_data))
+    
+    # Peserta trend
+    peserta_vals = recent_data['Jumlah_Peserta'].values
+    peserta_coef = np.polyfit(x_trend, peserta_vals, 1)
+    peserta_trend_slope = peserta_coef[0]  # Growth per month
+    
+    # Revenue trend
+    revenue_vals = recent_data['Total_Revenue'].values
+    revenue_coef = np.polyfit(x_trend, revenue_vals, 1)
+    revenue_trend_slope = revenue_coef[0]  # Growth per month
+    
+    # Starting values
+    last_peserta = extended_df['Jumlah_Peserta'].iloc[-1]
+    last_revenue = extended_df['Total_Revenue'].iloc[-1]
+    
+    # Cap growth rate untuk realistic forecasting
+    # Maksimal 5% growth per bulan
+    max_monthly_growth_peserta = last_peserta * 0.05
+    max_monthly_growth_revenue = last_revenue * 0.05
+    
+    peserta_trend_slope = np.clip(peserta_trend_slope, -max_monthly_growth_peserta, max_monthly_growth_peserta)
+    revenue_trend_slope = np.clip(revenue_trend_slope, -max_monthly_growth_revenue, max_monthly_growth_revenue)
+    
+    # ========================================================================
+    # STEP 2: Extrapolate Features untuk model input
+    # ========================================================================
     last_avg_harga = extended_df['Avg_Harga'].iloc[-1]
     last_referrals = extended_df['Total_Referrals'].iloc[-1]
     last_completion = extended_df['Completion_Revenue_Interaction'].iloc[-1]
+    last_revenue_per_user = extended_df['Revenue_per_User'].iloc[-1]
     
-    # Hitung growth rate dari 6 bulan terakhir untuk stabilisasi
-    recent_6_months = extended_df.tail(6)
-    if len(recent_6_months) >= 2:
-        avg_harga_growth = (recent_6_months['Avg_Harga'].iloc[-1] - recent_6_months['Avg_Harga'].iloc[0]) / len(recent_6_months)
-        referrals_growth = (recent_6_months['Total_Referrals'].iloc[-1] - recent_6_months['Total_Referrals'].iloc[0]) / len(recent_6_months)
-        completion_growth = (recent_6_months['Completion_Revenue_Interaction'].iloc[-1] - recent_6_months['Completion_Revenue_Interaction'].iloc[0]) / len(recent_6_months)
+    # Hitung feature growth
+    if len(recent_data) >= 2:
+        avg_harga_growth = (recent_data['Avg_Harga'].iloc[-1] - recent_data['Avg_Harga'].iloc[0]) / len(recent_data)
+        referrals_growth = (recent_data['Total_Referrals'].iloc[-1] - recent_data['Total_Referrals'].iloc[0]) / len(recent_data)
+        completion_growth = (recent_data['Completion_Revenue_Interaction'].iloc[-1] - recent_data['Completion_Revenue_Interaction'].iloc[0]) / len(recent_data)
     else:
         avg_harga_growth = 0
         referrals_growth = 0
         completion_growth = 0
     
+    # ========================================================================
+    # STEP 3: Generate Forecast - TREND BASED dengan Model Validation
+    # ========================================================================
+    forecast_peserta = []
+    forecast_revenue = []
+    
     for i in range(n_months):
-        new_row = {'Date': pd.to_datetime(future_dates[i] + '-01')}
+        # TREND-BASED FORECAST (Primary)
+        trend_peserta = last_peserta + (peserta_trend_slope * (i + 1))
+        trend_revenue = last_revenue + (revenue_trend_slope * (i + 1))
         
-        # Extrapolasi fitur eksogen dengan pertumbuhan lebih konservatif
+        # Extrapolate features untuk model check
+        new_row = {'Date': pd.to_datetime(future_dates[i] + '-01')}
         new_row['Avg_Harga'] = last_avg_harga + (avg_harga_growth * (i + 1))
         new_row['Total_Referrals'] = max(0, last_referrals + (referrals_growth * (i + 1)))
-        new_row['Completion_Revenue_Interaction'] = np.clip(
-            last_completion + (completion_growth * (i + 1)), 
-            0, 1
-        )
+        new_row['Completion_Revenue_Interaction'] = np.clip(last_completion + (completion_growth * (i + 1)), 0, 1)
         
-        # PERBAIKAN KRITIS: Hitung rolling features dari data + prediksi sebelumnya
-        # Ambil 6 bulan terakhir (termasuk prediksi yang sudah dibuat)
-        last_peserta = extended_df['Jumlah_Peserta'].tail(6).values
-        last_revenue = extended_df['Total_Revenue'].tail(6).values
+        # Rolling features dari trend prediction
+        if i == 0:
+            last_6_peserta = extended_df['Jumlah_Peserta'].tail(6).tolist()
+            last_6_revenue = extended_df['Total_Revenue'].tail(6).tolist()
+        else:
+            last_6_peserta = (extended_df['Jumlah_Peserta'].tail(6).tolist() + forecast_peserta)[-6:]
+            last_6_revenue = (extended_df['Total_Revenue'].tail(6).tolist() + forecast_revenue)[-6:]
         
-        # Rolling max 3 bulan
-        new_row['Jumlah_Peserta_roll_max3'] = np.max(last_peserta[-3:]) if len(last_peserta) >= 3 else np.max(last_peserta)
-        new_row['Total_Revenue_roll_max3'] = np.max(last_revenue[-3:]) if len(last_revenue) >= 3 else np.max(last_revenue)
+        new_row['Jumlah_Peserta_roll_max3'] = np.max(last_6_peserta[-3:])
+        new_row['Jumlah_Peserta_roll_max6'] = np.max(last_6_peserta)
+        new_row['Total_Revenue_roll_max3'] = np.max(last_6_revenue[-3:])
+        new_row['Total_Revenue_roll_max6'] = np.max(last_6_revenue)
+        new_row['Revenue_per_User'] = last_revenue_per_user
         
-        # Rolling max 6 bulan
-        new_row['Jumlah_Peserta_roll_max6'] = np.max(last_peserta)
-        new_row['Total_Revenue_roll_max6'] = np.max(last_revenue)
+        # Model prediction sebagai ADJUSTMENT FACTOR
+        try:
+            features = [new_row.get(f, 0) for f in REQUIRED_FEATURES]
+            features_df = pd.DataFrame([features], columns=REQUIRED_FEATURES)
+            
+            model_pred_peserta = peserta_model.predict(scaler_peserta.transform(features_df))[0]
+            model_pred_revenue = revenue_model.predict(scaler_revenue.transform(features_df))[0]
+            
+            # Jika model prediction reasonable (dalam 50% dari trend), gunakan blend
+            # Otherwise, stick dengan trend
+            if 0.5 * trend_peserta <= model_pred_peserta <= 1.5 * trend_peserta:
+                final_peserta = 0.7 * trend_peserta + 0.3 * model_pred_peserta
+            else:
+                final_peserta = trend_peserta
+                
+            if 0.5 * trend_revenue <= model_pred_revenue <= 1.5 * trend_revenue:
+                final_revenue = 0.7 * trend_revenue + 0.3 * model_pred_revenue
+            else:
+                final_revenue = trend_revenue
+        except:
+            # Jika model error, gunakan pure trend
+            final_peserta = trend_peserta
+            final_revenue = trend_revenue
         
-        # Revenue per User dari data terakhir (lebih stabil)
-        recent_revenue_per_user = extended_df['Revenue_per_User'].tail(3).mean()
-        new_row['Revenue_per_User'] = recent_revenue_per_user
+        # Ensure positive values
+        final_peserta = max(final_peserta, last_peserta * 0.8)  # Minimal 80% dari last value
+        final_revenue = max(final_revenue, last_revenue * 0.8)
         
-        # Siapkan feature vector
-        features = [new_row.get(f, 0) for f in REQUIRED_FEATURES]
-        features_df = pd.DataFrame([features], columns=REQUIRED_FEATURES)
+        forecast_peserta.append(final_peserta)
+        forecast_revenue.append(final_revenue)
         
-        # Prediksi dengan constraint: tidak boleh turun drastis
-        pred_peserta_raw = peserta_model.predict(scaler_peserta.transform(features_df))[0]
-        pred_revenue_raw = revenue_model.predict(scaler_revenue.transform(features_df))[0]
-        
-        # Constraint: prediksi tidak boleh turun > 20% dari nilai terakhir
-        last_peserta_val = extended_df['Jumlah_Peserta'].iloc[-1]
-        last_revenue_val = extended_df['Total_Revenue'].iloc[-1]
-        
-        # Smooth prediction: blend dengan nilai terakhir (80% prediksi + 20% last value untuk stabilitas)
-        pred_peserta = pred_peserta_raw * 0.85 + last_peserta_val * 0.15
-        pred_revenue = pred_revenue_raw * 0.85 + last_revenue_val * 0.15
-        
-        # Final constraint: minimal 70% dari nilai terakhir
-        pred_peserta = max(pred_peserta, last_peserta_val * 0.7)
-        pred_revenue = max(pred_revenue, last_revenue_val * 0.7)
-        
-        new_row['Jumlah_Peserta'] = pred_peserta
-        new_row['Total_Revenue'] = pred_revenue
-        
-        forecast_peserta.append(pred_peserta)
-        forecast_revenue.append(pred_revenue)
-        
-        # Tambahkan ke extended_df untuk iterasi berikutnya (KRITIS!)
+        # Update extended_df untuk rolling calculation
+        new_row['Jumlah_Peserta'] = final_peserta
+        new_row['Total_Revenue'] = final_revenue
         extended_df = pd.concat([extended_df, pd.DataFrame([new_row])], ignore_index=True)
     
     if target == 'revenue':
