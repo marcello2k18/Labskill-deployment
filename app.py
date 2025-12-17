@@ -1,5 +1,5 @@
 """
-Labskill Forecasting System - Streamlit App
+LBSK Forecasting System - Streamlit App
 """
 import streamlit as st
 import pandas as pd
@@ -309,31 +309,15 @@ tab1, tab2, tab3 = st.tabs(["🏠 Home", "💰 Revenue Forecast", "👥 Peserta 
 # HOME PAGE
 # ============================================================================
 with tab1:
-    st.markdown('<p class="sub-header">Upload CSV untuk melihat historical data & prediksi hingga 24 bulan ke depan (2026)</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Upload CSV untuk melihat historical data & prediksi 12 bulan ke depan (2026)</p>', unsafe_allow_html=True)
     
-    # Model Performance Cards
-    st.markdown("### 📊 Model Performance")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("#### 👥 Model Peserta")
-        st.markdown("- **R²:** 0.9276\n- **MAPE:** 1.78%")
-        st.success("✅ Excellent performance")
-    with col2:
-        st.markdown("#### 💰 Model Revenue")
-        st.markdown("- **R²:** 0.9017\n- **MAPE:** 3.11%")
-        st.success("✅ Strong performance")
-    
-    st.markdown("---")
-    
-    # Forecast Period Info
-    st.markdown("### ⏱️ Periode Forecast")
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        st.info("**Short-term (3-6 bulan)**\n\nAkurasi tinggi ~95%")
-    with col_b:
-        st.info("**Mid-term (9-12 bulan)**\n\nAkurasi baik ~85%\n\n✅ Rekomendasi")
-    with col_c:
-        st.info("**Long-term (18-24 bulan)**\n\nTrend analysis ~70%")
+    # Forecast Info
+    st.markdown("### 📊 Forecast Information")
+    col_info1, col_info2 = st.columns(2)
+    with col_info1:
+        st.info("**Periode Prediksi:** 12 bulan ke depan\n\n**Target:** Pertumbuhan peserta & revenue platform Labskill")
+    with col_info2:
+        st.success("**Model Performance:**\n\n✅ Peserta: R² 0.9276 | MAPE 1.78%\n\n✅ Revenue: R² 0.9017 | MAPE 3.11%")
     
     st.markdown("---")
     
@@ -414,28 +398,11 @@ def forecast_page(target_name, target_col, icon):
         st.stop()  # Tidak lanjut jika belum upload
     
     # ========================================================================
-    # FORECAST PERIOD SELECTOR
+    # SET FORECAST PERIOD (Fixed 12 bulan untuk prediksi sampai 2026)
     # ========================================================================
-    st.markdown("### ⚙️ Pengaturan Forecast")
-    col_slider1, col_slider2 = st.columns([3, 1])
-    
-    with col_slider1:
-        n_months_forecast = st.slider(
-            "Pilih periode forecast (bulan ke depan)",
-            min_value=3,
-            max_value=24,
-            value=12,
-            step=3,
-            help="Pilih berapa bulan ke depan yang ingin diprediksi. Untuk prediksi sampai akhir 2026, pilih 12-24 bulan."
-        )
-    
-    with col_slider2:
-        last_date = df['Date'].iloc[-1]
-        forecast_end = last_date + relativedelta(months=n_months_forecast)
-        st.metric("Prediksi Sampai", forecast_end.strftime('%b %Y'))
-    
-    st.info(f"📊 Akan memprediksi **{n_months_forecast} bulan** ke depan dari {last_date.strftime('%B %Y')} hingga {forecast_end.strftime('%B %Y')}")
-    st.markdown("---")
+    n_months_forecast = 12
+    last_date = df['Date'].iloc[-1]
+    forecast_end = last_date + relativedelta(months=n_months_forecast)
     
     # Generate forecast
     if target_name == "Revenue":
@@ -446,6 +413,9 @@ def forecast_page(target_name, target_col, icon):
     
     actual_dates = df['Date'].dt.strftime('%Y-%m').tolist()
     actual_values = df[target_col].tolist()
+    
+    # Info banner
+    st.info(f"📊 Prediksi **12 bulan ke depan**: {last_date.strftime('%B %Y')} → {forecast_end.strftime('%B %Y')}")
     
     # Metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -500,7 +470,7 @@ def forecast_page(target_name, target_col, icon):
     ))
     
     fig.update_layout(
-        title=f"{target_name}: Data Historis + Prediksi {n_months_forecast} Bulan ({forecast_end.strftime('%b %Y')})",
+        title=f"{target_name}: Data Historis + Prediksi 12 Bulan ({forecast_end.strftime('%b %Y')})",
         xaxis_title="Bulan",
         yaxis_title="Jumlah Peserta" if target_name == "Peserta" else "Revenue (IDR)",
         height=600,
@@ -510,7 +480,7 @@ def forecast_page(target_name, target_col, icon):
     st.plotly_chart(fig, use_container_width=True)
     
     # Tabel prediksi - FIXED: Format setiap kolom secara terpisah
-    with st.expander(f"### 📋 Detail Prediksi ({n_months_forecast} bulan)", expanded=True):
+    with st.expander("### 📋 Detail Prediksi (12 bulan)", expanded=True):
         forecast_df = pd.DataFrame({
             'Bulan': future_months,
             f'Prediksi {target_name}': [int(round(v)) for v in forecast_values],
@@ -525,13 +495,13 @@ def forecast_page(target_name, target_col, icon):
             'Batas Atas': '{:,}'
         })
         
-        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
         
         csv_out = forecast_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            f"📥 Download Hasil Prediksi {target_name} ({n_months_forecast} bulan)",
+            f"📥 Download Hasil Prediksi {target_name} (12 bulan)",
             data=csv_out,
-            file_name=f"{target_name.lower()}_forecast_{n_months_forecast}months_{datetime.now().strftime('%Y%m%d')}.csv",
+            file_name=f"{target_name.lower()}_forecast_12months_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv"
         )
 
