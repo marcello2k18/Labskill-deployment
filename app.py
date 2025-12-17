@@ -1,6 +1,6 @@
 """
 LBSK Forecasting System - Streamlit App
-Data historis REAL langsung tampil - Forecast muncul setelah upload
+Hanya menggunakan data dari CSV upload user (tanpa data training/hardcoded)
 """
 import streamlit as st
 import pandas as pd
@@ -56,7 +56,6 @@ st.markdown("""
 # ============================================================================
 @st.cache_resource
 def load_models():
-    """Load trained models"""
     try:
         peserta_model = joblib.load('xgb_peserta_optuna_best__1_.joblib')
         revenue_model = joblib.load('xgb_revenue_optuna_best__1_.joblib')
@@ -66,53 +65,6 @@ def load_models():
     except Exception as e:
         st.error(f"Error loading models: {e}")
         return None, None, None, None, False
-
-# ============================================================================
-# LOAD HISTORICAL DATA REAL
-# ============================================================================
-@st.cache_data
-def load_historical_data():
-    """
-    Load data historis REAL yang sudah ada
-    Sesuaikan dengan data training model kamu
-    """
-    # GANTI INI dengan data real kamu!
-    # Bisa dari file CSV yang kamu simpan di repo, atau hardcode dari hasil training
-    
-    # Contoh: kalau kamu punya file historical_data.csv di repo
-    try:
-        df_hist = pd.read_csv('historical_data.csv')
-        dates = df_hist['Date'].tolist()
-        revenue = df_hist['Total_Revenue'].tolist()
-        peserta = df_hist['Jumlah_Peserta'].tolist()
-        return dates, revenue, peserta
-    except:
-        # Atau hardcode dari data training (Sep 2023 - Jul 2025)
-        # INI DATA REAL DARI TRAINING KAMU - sesuaikan!
-        dates = [
-            '2023-09', '2023-10', '2023-11', '2023-12',
-            '2024-01', '2024-02', '2024-03', '2024-04', '2024-05', '2024-06',
-            '2024-07', '2024-08', '2024-09', '2024-10', '2024-11', '2024-12',
-            '2025-01', '2025-02', '2025-03', '2025-04', '2025-05', '2025-06', '2025-07'
-        ]
-        
-        # Revenue data real (sesuaikan dengan data training kamu)
-        revenue = [
-            400000000, 450000000, 480000000, 520000000,
-            560000000, 590000000, 620000000, 650000000, 680000000, 710000000,
-            740000000, 770000000, 800000000, 830000000, 860000000, 890000000,
-            920000000, 950000000, 980000000, 1010000000, 1040000000, 1070000000, 1100000000
-        ]
-        
-        # Peserta data real (sesuaikan dengan data training kamu)
-        peserta = [
-            220, 250, 270, 290,
-            310, 330, 350, 370, 390, 410,
-            430, 450, 470, 490, 510, 530,
-            550, 570, 590, 610, 630, 650, 670
-        ]
-        
-        return dates, revenue, peserta
 
 # ============================================================================
 # FEATURE NAMES
@@ -128,94 +80,101 @@ REQUIRED_FEATURES = [
     'Completion_Revenue_Interaction'
 ]
 
+EXOGEN_FEATURES = [
+    'Avg_Harga',
+    'Total_Referrals',
+    'Completion_Revenue_Interaction'
+]
+
 # ============================================================================
-# FORECAST FUNCTION
+# HELPER FUNCTIONS
 # ============================================================================
-def generate_forecast_smart(last_value, n_months=6, growth_rate=0.025):
-    """Generate forecast dengan growth + variation"""
-    forecast_values = []
-    
-    for i in range(n_months):
-        growth = (1 + growth_rate) ** (i + 1)
-        seasonal = 1 + 0.03 * np.sin(2 * np.pi * i / 12)
-        noise = np.random.uniform(0.98, 1.02)
-        forecast = last_value * growth * seasonal * noise
-        forecast_values.append(forecast)
-    
-    return forecast_values
+def extrapolate_next(series):
+    if len(series) < 2:
+        return series.iloc[-1] if not series.empty else 0
+    x = np.arange(len(series))
+    y = series.values
+    p = np.polyfit(x, y, 1)
+    return p[0] * len(series) + p[1]
 
 def generate_future_months(last_date, n_months=6):
-    """Generate future months"""
     if isinstance(last_date, str):
         last_date = pd.to_datetime(last_date + '-01')
-    
     future_dates = []
     for i in range(1, n_months + 1):
         future_date = last_date + relativedelta(months=i)
         future_dates.append(future_date.strftime('%Y-%m'))
-    
     return future_dates
+
+def generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_revenue, n_months=6, target='revenue'):
+    extended_df = df.copy()
+    extended_df['Date'] = pd.to_datetime(extended_df['Date'])
+    future_dates = generate_future_months(extended_df['Date'].iloc[-1], n_months)
+    forecast_peserta = []
+    forecast_revenue = []
+    
+    for i in range(n_months):
+        new_row = {'Date': pd.to_datetime(future_dates[i] + '-01')}
+        
+        # Extrapolasi fitur eksogen
+        for feat in EXOGEN_FEATURES:
+            new_row[feat] = extrapolate_next(extended_df[feat])
+        
+        # Hitung rolling features dari data historis
+        last_peserta = extended_df['Jumlah_Peserta'].tail(6).values
+        last_revenue = extended_df['Total_Revenue'].tail(6).values
+        
+        new_row['Jumlah_Peserta_roll_max3'] = np.max(last_peserta[-3:]) if len(last_peserta) >= 3 else np.max(last_peserta) if len(last_peserta) > 0 else 0
+        new_row['Jumlah_Peserta_roll_max6'] = np.max(last_peserta) if len(last_peserta) >= 6 else np.max(last_peserta) if len(last_peserta) > 0 else 0
+        new_row['Total_Revenue_roll_max3'] = np.max(last_revenue[-3:]) if len(last_revenue) >= 3 else np.max(last_revenue) if len(last_revenue) > 0 else 0
+        new_row['Total_Revenue_roll_max6'] = np.max(last_revenue) if len(last_revenue) >= 6 else np.max(last_revenue) if len(last_revenue) > 0 else 0
+        
+        last_rev = extended_df['Total_Revenue'].iloc[-1]
+        last_pes = extended_df['Jumlah_Peserta'].iloc[-1]
+        new_row['Revenue_per_User'] = last_rev / last_pes if last_pes != 0 else 0
+        
+        # Siapkan feature vector
+        features = [new_row.get(f, 0) for f in REQUIRED_FEATURES]
+        features_df = pd.DataFrame([features], columns=REQUIRED_FEATURES)
+        
+        # Prediksi
+        pred_peserta = peserta_model.predict(scaler_peserta.transform(features_df))[0]
+        pred_revenue = revenue_model.predict(scaler_revenue.transform(features_df))[0]
+        
+        new_row['Jumlah_Peserta'] = pred_peserta
+        new_row['Total_Revenue'] = pred_revenue
+        
+        forecast_peserta.append(pred_peserta)
+        forecast_revenue.append(pred_revenue)
+        
+        # Tambahkan ke extended_df untuk iterasi berikutnya
+        extended_df = pd.concat([extended_df, pd.DataFrame([new_row])], ignore_index=True)
+    
+    if target == 'revenue':
+        return forecast_revenue, future_dates
+    else:
+        return forecast_peserta, future_dates
 
 # ============================================================================
 # SIDEBAR
 # ============================================================================
 st.sidebar.title("🚀 LBSK Forecasting")
 st.sidebar.markdown("---")
-page = st.sidebar.radio(
-    "Navigation",
-    ["🏠 Home", "💰 Revenue Forecast", "👥 Peserta Forecast"]
-)
-
+page = st.sidebar.radio("Navigation", ["🏠 Home", "💰 Revenue Forecast", "👥 Peserta Forecast"])
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**Model Performance:**
-
-**Peserta:**
-- R²: 0.9276
-- MAPE: 1.78%
-
-**Revenue:**
-- R²: 0.9017
-- MAPE: 3.11%
+**Model Performance (dari validasi):**
+- Peserta: R² 0.9276 | MAPE 1.78%
+- Revenue: R² 0.9017 | MAPE 3.11%
 """)
-
 st.sidebar.markdown("---")
-st.sidebar.markdown("""
-**📋 CSV Format:**
-
-Required columns:
-- **Date** (YYYY-MM)
-- **Total_Revenue** or **Jumlah_Peserta**
-- 8 feature columns
-""")
+st.sidebar.markdown("**Format CSV yang dibutuhkan:**\n- Date (YYYY-MM)\n- Jumlah_Peserta\n- Total_Revenue\n- 8 kolom fitur (lihat sample)")
 
 # ============================================================================
-# PAGE: HOME
+# SAMPLE DATA UNTUK DOWNLOAD
 # ============================================================================
-if page == "🏠 Home":
-    st.markdown('<h1 class="main-header">Machine Learning-Powered Forecasting</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Upload CSV to generate 6-month forecast</p>', unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### 👥 Peserta Model")
-        st.markdown("- **R²:** 0.9276")
-        st.markdown("- **MAPE:** 1.78%")
-        st.success("✅ Excellent performance")
-    
-    with col2:
-        st.markdown("#### 💰 Revenue Model")
-        st.markdown("- **R²:** 0.9017")
-        st.markdown("- **MAPE:** 3.11%")
-        st.success("✅ Strong performance")
-    
-    st.markdown("---")
-    st.markdown("### 📥 Sample CSV Format")
-    
-    sample_df = pd.DataFrame({
+def get_sample_df():
+    return pd.DataFrame({
         'Date': ['2024-01', '2024-02', '2024-03', '2024-04', '2024-05'],
         'Jumlah_Peserta': [800, 820, 850, 880, 900],
         'Total_Revenue': [1200000000, 1250000000, 1300000000, 1350000000, 1400000000],
@@ -228,418 +187,168 @@ if page == "🏠 Home":
         'Revenue_per_User': [1500000, 1524000, 1529000, 1534000, 1556000],
         'Completion_Revenue_Interaction': [0.85, 0.86, 0.87, 0.88, 0.89]
     })
+
+# ============================================================================
+# HOME PAGE
+# ============================================================================
+if page == "🏠 Home":
+    st.markdown('<h1 class="main-header">LBSK Forecasting System</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Upload CSV untuk melihat historical data & prediksi 6 bulan ke depan</p>', unsafe_allow_html=True)
     
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("#### 👥 Model Peserta")
+        st.markdown("- R²: 0.9276\n- MAPE: 1.78%")
+        st.success("✅ Excellent performance")
+    with col2:
+        st.markdown("#### 💰 Model Revenue")
+        st.markdown("- R²: 0.9017\n- MAPE: 3.11%")
+        st.success("✅ Strong performance")
+    
+    st.markdown("---")
+    st.markdown("### 📥 Contoh Format CSV")
+    sample_df = get_sample_df()
     st.dataframe(sample_df, use_container_width=True)
     
     csv = sample_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download Sample CSV",
-        data=csv,
-        file_name='sample_forecast_data.csv',
-        mime='text/csv',
-    )
+    st.download_button("📥 Download Sample CSV", data=csv, file_name="sample_labskill_data.csv", mime="text/csv")
 
 # ============================================================================
-# PAGE: REVENUE FORECAST
+# REVENUE & PESERTA PAGES (sama logikanya, hanya beda target)
 # ============================================================================
-elif page == "💰 Revenue Forecast":
-    st.markdown('<h1 class="main-header">💰 Revenue Forecast</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Historical data + Upload CSV for forecast</p>', unsafe_allow_html=True)
+def forecast_page(target_name, target_col, icon):
+    st.markdown(f'<h1 class="main-header">{icon} {target_name} Forecast</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Upload CSV untuk melihat data historis dan prediksi</p>', unsafe_allow_html=True)
     
-    # Load models
     peserta_model, revenue_model, scaler_peserta, scaler_revenue, models_loaded = load_models()
+    if not models_loaded:
+        st.stop()
     
-    # Load historical data REAL
-    hist_dates, hist_revenue, hist_peserta = load_historical_data()
-    
-    # Initialize variables
-    actual_dates = hist_dates
-    actual_revenue = hist_revenue
-    future_months = None
-    forecast_values = None
-    has_forecast = False
-    
-    # Upload section
     st.markdown('<div class="upload-section">', unsafe_allow_html=True)
-    st.markdown("### 📤 Upload CSV to Generate Forecast")
+    st.markdown("### 📤 Upload CSV Data Terbaru")
     
-    uploaded_file = st.file_uploader(
-        "Upload CSV with your latest data",
-        type=['csv'],
-        help="Upload to generate 6-month forecast"
-    )
+    uploaded_file = st.file_uploader("Pilih file CSV", type=['csv'])
     
+    df = None
     if uploaded_file:
         try:
             df = pd.read_csv(uploaded_file)
-            st.success(f"✅ File uploaded: {uploaded_file.name} ({len(df)} rows)")
-            
-            required_cols = ['Date', 'Total_Revenue'] + REQUIRED_FEATURES
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            
-            if missing_cols:
-                st.error(f"❌ Missing columns: {', '.join(missing_cols)}")
+            required = ['Date', 'Jumlah_Peserta', 'Total_Revenue'] + REQUIRED_FEATURES
+            missing = [c for c in required if c not in df.columns]
+            if missing:
+                st.error(f"Kolom yang hilang: {', '.join(missing)}")
+                df = None
             else:
-                df['Date'] = pd.to_datetime(df['Date'])
-                df = df.sort_values('Date')
-                
-                # Update actual data dengan data dari CSV
-                actual_dates = df['Date'].dt.strftime('%Y-%m').tolist()
-                actual_revenue = df['Total_Revenue'].tolist()
-                
-                # Generate forecast
-                future_months = generate_future_months(actual_dates[-1], n_months=6)
-                forecast_values = generate_forecast_smart(actual_revenue[-1], n_months=6, growth_rate=0.028)
-                has_forecast = True
-                
-                with st.expander("👀 Preview Data"):
-                    st.dataframe(df.head(10), use_container_width=True)
-                
-                st.success("✅ Forecast generated!")
-            
+                df['Date'] = df['Date'].apply(lambda x: pd.to_datetime(x + '-01') if len(str(x)) == 7 else pd.to_datetime(x))
+                df = df.sort_values('Date').reset_index(drop=True)
+                st.success(f"✅ Berhasil upload {len(df)} baris data")
+                with st.expander("Preview Data"):
+                    st.dataframe(df.tail(10), use_container_width=True)
         except Exception as e:
-            st.error(f"❌ Error: {e}")
+            st.error(f"Error: {e}")
+            df = None
     else:
-        st.info("👆 Upload CSV to generate forecast and see prediction")
+        st.info("Upload CSV untuk melihat grafik dan prediksi")
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # ========================================================================
-    # CHART - ALWAYS SHOW HISTORICAL + FORECAST (if uploaded)
-    # ========================================================================
-    st.markdown("---")
-    st.markdown("### 📈 Revenue Analysis")
+    if df is None:
+        st.stop()  # Tidak lanjut jika belum upload
+    
+    # Generate forecast
+    if target_name == "Revenue":
+        forecast_values, future_months = generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_revenue, target='revenue')
+    else:
+        forecast_values, future_months = generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_revenue, target='peserta')
+        forecast_values = [int(round(v)) for v in forecast_values]
+    
+    actual_dates = df['Date'].dt.strftime('%Y-%m').tolist()
+    actual_values = df[target_col].tolist()
     
     # Metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Last Actual", f"IDR {actual_revenue[-1]:,.0f}")
+        st.metric("Data Terakhir", f"{actual_values[-1]:,}" if target_col == 'Jumlah_Peserta' else f"IDR {actual_values[-1]:,.0f}")
     with col2:
-        if has_forecast:
-            st.metric("Avg Forecast", f"IDR {np.mean(forecast_values):,.0f}")
-        else:
-            st.metric("Avg Forecast", "Upload CSV")
+        st.metric("Rata-rata Forecast", f"{int(np.mean(forecast_values)):,}" if target_col == 'Jumlah_Peserta' else f"IDR {np.mean(forecast_values):,.0f}")
     with col3:
-        if has_forecast:
-            growth = ((np.mean(forecast_values) - actual_revenue[-1]) / actual_revenue[-1]) * 100
-            st.metric("Growth", f"{growth:.1f}%")
-        else:
-            st.metric("Growth", "-")
+        growth = (np.mean(forecast_values) - actual_values[-1]) / actual_values[-1] * 100
+        st.metric("Pertumbuhan Prediksi", f"{growth:.1f}%")
     with col4:
-        st.metric("Historical", f"{len(actual_dates)} months")
+        st.metric("Jumlah Data Historis", f"{len(actual_dates)} bulan")
     
-    # Create figure
+    # Chart
     fig = go.Figure()
-    
-    # Actual data (Blue) - ALWAYS SHOW
     fig.add_trace(go.Scatter(
         x=actual_dates,
-        y=actual_revenue,
+        y=actual_values,
         mode='lines+markers',
-        name='Actual',
+        name='Aktual',
         line=dict(color='#1f77b4', width=3),
-        marker=dict(size=6),
-        hovertemplate='<b>%{x}</b><br>IDR %{y:,.0f}<extra></extra>'
-    ))
-    
-    # Forecast (Orange) - ONLY if uploaded
-    if has_forecast:
-        # Smooth blending
-        blend_dates = [actual_dates[-1], future_months[0]]
-        blend_values = [actual_revenue[-1], forecast_values[0]]
-        
-        fig.add_trace(go.Scatter(
-            x=blend_dates,
-            y=blend_values,
-            mode='lines',
-            line=dict(color='#ff7f0e', width=3, dash='dot'),
-            showlegend=False,
-            hoverinfo='skip'
-        ))
-        
-        # Forecast line
-        fig.add_trace(go.Scatter(
-            x=future_months,
-            y=forecast_values,
-            mode='lines+markers',
-            name='Forecast',
-            line=dict(color='#ff7f0e', width=3, dash='dash'),
-            marker=dict(size=7, symbol='square'),
-            hovertemplate='<b>%{x}</b><br>IDR %{y:,.0f}<extra></extra>'
-        ))
-        
-        # Confidence interval
-        upper = [v * 1.08 for v in forecast_values]
-        lower = [v * 0.92 for v in forecast_values]
-        
-        fig.add_trace(go.Scatter(
-            x=future_months + future_months[::-1],
-            y=upper + lower[::-1],
-            fill='toself',
-            fillcolor='rgba(255, 127, 14, 0.15)',
-            line=dict(color='rgba(255,255,255,0)'),
-            name='Confidence Interval',
-            showlegend=True,
-            hoverinfo='skip'
-        ))
-    
-    chart_title = "Revenue: Historical Data"
-    if has_forecast:
-        chart_title += " + 6-Month Forecast"
-    else:
-        chart_title += " (Upload CSV for forecast)"
-    
-    fig.update_layout(
-        title={
-            'text': chart_title,
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 18}
-        },
-        xaxis_title="Month",
-        yaxis_title="Revenue (IDR)",
-        height=600,
-        hovermode='x unified',
-        template='plotly_white',
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Forecast table - only if uploaded
-    if has_forecast:
-        st.markdown("### 📋 Forecast Details")
-        
-        upper = [v * 1.08 for v in forecast_values]
-        lower = [v * 0.92 for v in forecast_values]
-        
-        forecast_df = pd.DataFrame({
-            'Month': future_months,
-            'Predicted Revenue (IDR)': [int(v) for v in forecast_values],
-            'Lower Bound (IDR)': [int(v) for v in lower],
-            'Upper Bound (IDR)': [int(v) for v in upper]
-        })
-        
-        st.dataframe(
-            forecast_df.style.format({
-                'Predicted Revenue (IDR)': '{:,}',
-                'Lower Bound (IDR)': '{:,}',
-                'Upper Bound (IDR)': '{:,}'
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        csv_forecast = forecast_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Forecast Results",
-            data=csv_forecast,
-            file_name=f'revenue_forecast_{datetime.now().strftime("%Y%m%d")}.csv',
-            mime='text/csv',
-        )
-
-# ============================================================================
-# PAGE: PESERTA FORECAST
-# ============================================================================
-elif page == "👥 Peserta Forecast":
-    st.markdown('<h1 class="main-header">👥 Peserta Forecast</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Historical data + Upload CSV for forecast</p>', unsafe_allow_html=True)
-    
-    # Load models
-    peserta_model, revenue_model, scaler_peserta, scaler_revenue, models_loaded = load_models()
-    
-    # Load historical data REAL
-    hist_dates, hist_revenue, hist_peserta = load_historical_data()
-    
-    # Initialize
-    actual_dates = hist_dates
-    actual_peserta = hist_peserta
-    future_months = None
-    forecast_values = None
-    has_forecast = False
-    
-    # Upload section
-    st.markdown('<div class="upload-section">', unsafe_allow_html=True)
-    st.markdown("### 📤 Upload CSV to Generate Forecast")
-    
-    uploaded_file = st.file_uploader(
-        "Upload CSV with your latest data",
-        type=['csv'],
-        help="Upload to generate 6-month forecast",
-        key='peserta_upload'
-    )
-    
-    if uploaded_file:
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.success(f"✅ File uploaded: {uploaded_file.name} ({len(df)} rows)")
-            
-            required_cols = ['Date', 'Jumlah_Peserta'] + REQUIRED_FEATURES
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            
-            if missing_cols:
-                st.error(f"❌ Missing columns: {', '.join(missing_cols)}")
-            else:
-                df['Date'] = pd.to_datetime(df['Date'])
-                df = df.sort_values('Date')
-                
-                actual_dates = df['Date'].dt.strftime('%Y-%m').tolist()
-                actual_peserta = df['Jumlah_Peserta'].tolist()
-                
-                future_months = generate_future_months(actual_dates[-1], n_months=6)
-                forecast_values = generate_forecast_smart(actual_peserta[-1], n_months=6, growth_rate=0.022)
-                forecast_values = [int(v) for v in forecast_values]
-                has_forecast = True
-                
-                with st.expander("👀 Preview Data"):
-                    st.dataframe(df.head(10), use_container_width=True)
-                
-                st.success("✅ Forecast generated!")
-        
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
-    else:
-        st.info("👆 Upload CSV to generate forecast and see prediction")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # ========================================================================
-    # CHART
-    # ========================================================================
-    st.markdown("---")
-    st.markdown("### 📈 Peserta Analysis")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Last Actual", f"{actual_peserta[-1]:,}")
-    with col2:
-        if has_forecast:
-            st.metric("Avg Forecast", f"{int(np.mean(forecast_values)):,}")
-        else:
-            st.metric("Avg Forecast", "Upload CSV")
-    with col3:
-        if has_forecast:
-            growth = ((np.mean(forecast_values) - actual_peserta[-1]) / actual_peserta[-1]) * 100
-            st.metric("Growth", f"{growth:.1f}%")
-        else:
-            st.metric("Growth", "-")
-    with col4:
-        st.metric("Historical", f"{len(actual_dates)} months")
-    
-    fig = go.Figure()
-    
-    # Actual
-    fig.add_trace(go.Scatter(
-        x=actual_dates,
-        y=actual_peserta,
-        mode='lines+markers',
-        name='Actual',
-        line=dict(color='#1f77b4', width=3),
-        marker=dict(size=6),
-        hovertemplate='<b>%{x}</b><br>%{y:,} participants<extra></extra>'
+        marker=dict(size=6)
     ))
     
     # Forecast
-    if has_forecast:
-        blend_dates = [actual_dates[-1], future_months[0]]
-        blend_values = [actual_peserta[-1], forecast_values[0]]
-        
-        fig.add_trace(go.Scatter(
-            x=blend_dates,
-            y=blend_values,
-            mode='lines',
-            line=dict(color='#ff7f0e', width=3, dash='dot'),
-            showlegend=False,
-            hoverinfo='skip'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=future_months,
-            y=forecast_values,
-            mode='lines+markers',
-            name='Forecast',
-            line=dict(color='#ff7f0e', width=3, dash='dash'),
-            marker=dict(size=7, symbol='square'),
-            hovertemplate='<b>%{x}</b><br>%{y:,} participants<extra></extra>'
-        ))
-        
-        upper = [int(v * 1.05) for v in forecast_values]
-        lower = [int(v * 0.95) for v in forecast_values]
-        
-        fig.add_trace(go.Scatter(
-            x=future_months + future_months[::-1],
-            y=upper + lower[::-1],
-            fill='toself',
-            fillcolor='rgba(255, 127, 14, 0.15)',
-            line=dict(color='rgba(255,255,255,0)'),
-            name='Confidence Interval',
-            showlegend=True,
-            hoverinfo='skip'
-        ))
+    blend_x = [actual_dates[-1], future_months[0]]
+    blend_y = [actual_values[-1], forecast_values[0]]
+    fig.add_trace(go.Scatter(x=blend_x, y=blend_y, mode='lines', line=dict(color='#ff7f0e', dash='dot'), showlegend=False, hoverinfo='skip'))
     
-    chart_title = "Participants: Historical Data"
-    if has_forecast:
-        chart_title += " + 6-Month Forecast"
-    else:
-        chart_title += " (Upload CSV for forecast)"
+    fig.add_trace(go.Scatter(
+        x=future_months,
+        y=forecast_values,
+        mode='lines+markers',
+        name='Prediksi',
+        line=dict(color='#ff7f0e', width=3, dash='dash'),
+        marker=dict(size=7, symbol='square')
+    ))
+    
+    # Confidence band
+    factor = 1.08 if target_name == "Revenue" else 1.05
+    upper = [v * factor for v in forecast_values]
+    lower = [v / factor for v in forecast_values]
+    fig.add_trace(go.Scatter(
+        x=future_months + future_months[::-1],
+        y=upper + lower[::-1],
+        fill='toself',
+        fillcolor='rgba(255,127,14,0.15)',
+        line=dict(color='rgba(255,255,255,0)'),
+        name='Confidence Interval',
+        showlegend=True,
+        hoverinfo='skip'
+    ))
     
     fig.update_layout(
-        title={
-            'text': chart_title,
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 18}
-        },
-        xaxis_title="Month",
-        yaxis_title="Number of Participants",
+        title=f"{target_name}: Data Historis + Prediksi 6 Bulan",
+        xaxis_title="Bulan",
+        yaxis_title="Jumlah Peserta" if target_name == "Peserta" else "Revenue (IDR)",
         height=600,
         hovermode='x unified',
-        template='plotly_white',
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        template='plotly_white'
     )
-    
     st.plotly_chart(fig, use_container_width=True)
     
-    # Table
-    if has_forecast:
-        st.markdown("### 📋 Forecast Details")
-        
-        upper = [int(v * 1.05) for v in forecast_values]
-        lower = [int(v * 0.95) for v in forecast_values]
-        
-        forecast_df = pd.DataFrame({
-            'Month': future_months,
-            'Predicted Participants': forecast_values,
-            'Lower Bound': lower,
-            'Upper Bound': upper
-        })
-        
-        st.dataframe(
-            forecast_df.style.format({
-                'Predicted Participants': '{:,}',
-                'Lower Bound': '{:,}',
-                'Upper Bound': '{:,}'
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        csv_forecast = forecast_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Download Forecast Results",
-            data=csv_forecast,
-            file_name=f'peserta_forecast_{datetime.now().strftime("%Y%m%d")}.csv',
-            mime='text/csv',
-        )
+    # Tabel prediksi
+    st.markdown("### 📋 Detail Prediksi")
+    forecast_df = pd.DataFrame({
+        'Bulan': future_months,
+        f'Prediksi {target_name}': [int(round(v)) for v in forecast_values],
+        'Batas Bawah': [int(round(v / factor)) for v in forecast_values],
+        'Batas Atas': [int(round(v * factor)) for v in forecast_values]
+    })
+    st.dataframe(forecast_df.style.format('{:,}'), use_container_width=True, hide_index=True)
+    
+    csv_out = forecast_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        f"📥 Download Hasil Prediksi {target_name}",
+        data=csv_out,
+        file_name=f"{target_name.lower()}_forecast_{datetime.now().strftime('%Y%m%d')}.csv",
+        mime="text/csv"
+    )
+
+# ============================================================================
+# ROUTING
+# ============================================================================
+if page == "💰 Revenue Forecast":
+    forecast_page("Revenue", "Total_Revenue", "💰")
+elif page == "👥 Peserta Forecast":
+    forecast_page("Peserta", "Jumlah_Peserta", "👥")
