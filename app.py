@@ -369,7 +369,12 @@ def forecast_page(target_name, target_col, icon):
     st.markdown('<div class="upload-section">', unsafe_allow_html=True)
     st.markdown("### 📤 Upload CSV Data Terbaru")
     
-    uploaded_file = st.file_uploader("Pilih file CSV", type=['csv'])
+    # CRITICAL FIX: Add unique key for each tab's file uploader
+    uploaded_file = st.file_uploader(
+        "Pilih file CSV", 
+        type=['csv'],
+        key=f"uploader_{target_name.lower()}"  # Unique key per tab!
+    )
     
     df = None
     if uploaded_file:
