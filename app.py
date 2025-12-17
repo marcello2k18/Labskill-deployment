@@ -1,6 +1,5 @@
 """
 LBSK Forecasting System - Streamlit App
-Hanya menggunakan data dari CSV upload user (tanpa data training/hardcoded)
 """
 import streamlit as st
 import pandas as pd
@@ -306,9 +305,14 @@ st.sidebar.markdown("---")
 page = st.sidebar.radio("Navigation", ["🏠 Home", "💰 Revenue Forecast", "👥 Peserta Forecast"])
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**Model Performance (dari validasi):**
+**Model Performance:**
 - Peserta: R² 0.9276 | MAPE 1.78%
 - Revenue: R² 0.9017 | MAPE 3.11%
+
+**Periode Forecast:**
+- Short-term: 3-6 bulan (Akurasi tinggi)
+- Mid-term: 9-12 bulan (Rekomendasi)
+- Long-term: 18-24 bulan (Trend analysis)
 """)
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Format CSV yang dibutuhkan:**\n- Date (YYYY-MM)\n- Jumlah_Peserta\n- Total_Revenue\n- 8 kolom fitur (lihat sample)")
@@ -318,7 +322,7 @@ st.sidebar.markdown("**Format CSV yang dibutuhkan:**\n- Date (YYYY-MM)\n- Jumlah
 # ============================================================================
 if page == "🏠 Home":
     st.markdown('<h1 class="main-header">LBSK Forecasting System</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Upload CSV untuk melihat historical data & prediksi 6 bulan ke depan</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Upload CSV untuk melihat historical data & prediksi hingga 24 bulan ke depan (2026)</p>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -388,11 +392,35 @@ def forecast_page(target_name, target_col, icon):
     if df is None:
         st.stop()  # Tidak lanjut jika belum upload
     
+    # ========================================================================
+    # FORECAST PERIOD SELECTOR
+    # ========================================================================
+    st.markdown("### ⚙️ Pengaturan Forecast")
+    col_slider1, col_slider2 = st.columns([3, 1])
+    
+    with col_slider1:
+        n_months_forecast = st.slider(
+            "Pilih periode forecast (bulan ke depan)",
+            min_value=3,
+            max_value=24,
+            value=12,
+            step=3,
+            help="Pilih berapa bulan ke depan yang ingin diprediksi. Untuk prediksi sampai akhir 2026, pilih 12-24 bulan."
+        )
+    
+    with col_slider2:
+        last_date = df['Date'].iloc[-1]
+        forecast_end = last_date + relativedelta(months=n_months_forecast)
+        st.metric("Prediksi Sampai", forecast_end.strftime('%b %Y'))
+    
+    st.info(f"📊 Akan memprediksi **{n_months_forecast} bulan** ke depan dari {last_date.strftime('%B %Y')} hingga {forecast_end.strftime('%B %Y')}")
+    st.markdown("---")
+    
     # Generate forecast
     if target_name == "Revenue":
-        forecast_values, future_months = generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_revenue, target='revenue')
+        forecast_values, future_months = generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_revenue, n_months=n_months_forecast, target='revenue')
     else:
-        forecast_values, future_months = generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_revenue, target='peserta')
+        forecast_values, future_months = generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_revenue, n_months=n_months_forecast, target='peserta')
         forecast_values = [int(round(v)) for v in forecast_values]
     
     actual_dates = df['Date'].dt.strftime('%Y-%m').tolist()
@@ -451,7 +479,7 @@ def forecast_page(target_name, target_col, icon):
     ))
     
     fig.update_layout(
-        title=f"{target_name}: Data Historis + Prediksi 6 Bulan",
+        title=f"{target_name}: Data Historis + Prediksi {n_months_forecast} Bulan ({forecast_end.strftime('%b %Y')})",
         xaxis_title="Bulan",
         yaxis_title="Jumlah Peserta" if target_name == "Peserta" else "Revenue (IDR)",
         height=600,
@@ -461,30 +489,30 @@ def forecast_page(target_name, target_col, icon):
     st.plotly_chart(fig, use_container_width=True)
     
     # Tabel prediksi - FIXED: Format setiap kolom secara terpisah
-    st.markdown("### 📋 Detail Prediksi")
-    forecast_df = pd.DataFrame({
-        'Bulan': future_months,
-        f'Prediksi {target_name}': [int(round(v)) for v in forecast_values],
-        'Batas Bawah': [int(round(v / factor)) for v in forecast_values],
-        'Batas Atas': [int(round(v * factor)) for v in forecast_values]
-    })
-    
-    # Format hanya kolom numerik
-    styled_df = forecast_df.style.format({
-        f'Prediksi {target_name}': '{:,}',
-        'Batas Bawah': '{:,}',
-        'Batas Atas': '{:,}'
-    })
-    
-    st.dataframe(styled_df, use_container_width=True, hide_index=True)
-    
-    csv_out = forecast_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        f"📥 Download Hasil Prediksi {target_name}",
-        data=csv_out,
-        file_name=f"{target_name.lower()}_forecast_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime="text/csv"
-    )
+    with st.expander(f"### 📋 Detail Prediksi ({n_months_forecast} bulan)", expanded=True):
+        forecast_df = pd.DataFrame({
+            'Bulan': future_months,
+            f'Prediksi {target_name}': [int(round(v)) for v in forecast_values],
+            'Batas Bawah': [int(round(v / factor)) for v in forecast_values],
+            'Batas Atas': [int(round(v * factor)) for v in forecast_values]
+        })
+        
+        # Format hanya kolom numerik
+        styled_df = forecast_df.style.format({
+            f'Prediksi {target_name}': '{:,}',
+            'Batas Bawah': '{:,}',
+            'Batas Atas': '{:,}'
+        })
+        
+        st.dataframe(styled_df, use_container_width=True, hide_index=True, height=400)
+        
+        csv_out = forecast_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            f"📥 Download Hasil Prediksi {target_name} ({n_months_forecast} bulan)",
+            data=csv_out,
+            file_name=f"{target_name.lower()}_forecast_{n_months_forecast}months_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
 
 # ============================================================================
 # ROUTING
