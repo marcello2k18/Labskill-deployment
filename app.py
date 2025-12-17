@@ -1,5 +1,6 @@
 """
 LBSK Forecasting System - Streamlit App
+Hanya menggunakan data dari CSV upload user (tanpa data training/hardcoded)
 """
 import streamlit as st
 import pandas as pd
