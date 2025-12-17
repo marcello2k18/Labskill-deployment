@@ -1,6 +1,5 @@
 """
 LBSK Forecasting System - Streamlit App
-Hanya menggunakan data dari CSV upload user (tanpa data training/hardcoded)
 """
 import streamlit as st
 import pandas as pd
@@ -156,6 +155,68 @@ def generate_forecast(df, peserta_model, revenue_model, scaler_peserta, scaler_r
         return forecast_peserta, future_dates
 
 # ============================================================================
+# SAMPLE DATA UNTUK DOWNLOAD
+# ============================================================================
+def get_sample_df():
+    """
+    Generate sample data: 20 bulan training + 5 bulan testing = 25 bulan total
+    Periode: Januari 2023 - Januari 2025
+    """
+    dates = pd.date_range('2023-01', periods=25, freq='MS')
+    date_strings = [d.strftime('%Y-%m') for d in dates]
+    
+    # Generate realistic progressive data
+    base_peserta = 600
+    peserta_growth = [base_peserta + i*15 + np.random.randint(-10, 20) for i in range(25)]
+    
+    base_revenue = 900000000  # 900 juta
+    revenue_growth = [base_revenue + i*50000000 + np.random.randint(-10000000, 30000000) for i in range(25)]
+    
+    avg_harga = [revenue_growth[i] / peserta_growth[i] if peserta_growth[i] > 0 else 1500000 for i in range(25)]
+    
+    referrals = [30 + i*2 + np.random.randint(-3, 5) for i in range(25)]
+    
+    data = {
+        'Date': date_strings,
+        'Jumlah_Peserta': peserta_growth,
+        'Total_Revenue': revenue_growth,
+        'Avg_Harga': [int(h) for h in avg_harga],
+        'Total_Referrals': referrals,
+        'Jumlah_Peserta_roll_max3': [0]*25,  # Will be calculated below
+        'Jumlah_Peserta_roll_max6': [0]*25,
+        'Total_Revenue_roll_max3': [0]*25,
+        'Total_Revenue_roll_max6': [0]*25,
+        'Revenue_per_User': [int(revenue_growth[i] / peserta_growth[i]) if peserta_growth[i] > 0 else 0 for i in range(25)],
+        'Completion_Revenue_Interaction': [0.80 + i*0.003 + np.random.uniform(-0.02, 0.02) for i in range(25)]
+    }
+    
+    df = pd.DataFrame(data)
+    
+    # Calculate rolling features properly
+    for i in range(len(df)):
+        if i >= 2:
+            df.at[i, 'Jumlah_Peserta_roll_max3'] = df['Jumlah_Peserta'].iloc[max(0, i-2):i+1].max()
+        else:
+            df.at[i, 'Jumlah_Peserta_roll_max3'] = df['Jumlah_Peserta'].iloc[:i+1].max()
+            
+        if i >= 5:
+            df.at[i, 'Jumlah_Peserta_roll_max6'] = df['Jumlah_Peserta'].iloc[max(0, i-5):i+1].max()
+        else:
+            df.at[i, 'Jumlah_Peserta_roll_max6'] = df['Jumlah_Peserta'].iloc[:i+1].max()
+            
+        if i >= 2:
+            df.at[i, 'Total_Revenue_roll_max3'] = df['Total_Revenue'].iloc[max(0, i-2):i+1].max()
+        else:
+            df.at[i, 'Total_Revenue_roll_max3'] = df['Total_Revenue'].iloc[:i+1].max()
+            
+        if i >= 5:
+            df.at[i, 'Total_Revenue_roll_max6'] = df['Total_Revenue'].iloc[max(0, i-5):i+1].max()
+        else:
+            df.at[i, 'Total_Revenue_roll_max6'] = df['Total_Revenue'].iloc[:i+1].max()
+    
+    return df
+
+# ============================================================================
 # SIDEBAR
 # ============================================================================
 st.sidebar.title("🚀 LBSK Forecasting")
@@ -169,24 +230,6 @@ st.sidebar.info("""
 """)
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Format CSV yang dibutuhkan:**\n- Date (YYYY-MM)\n- Jumlah_Peserta\n- Total_Revenue\n- 8 kolom fitur (lihat sample)")
-
-# ============================================================================
-# SAMPLE DATA UNTUK DOWNLOAD
-# ============================================================================
-def get_sample_df():
-    return pd.DataFrame({
-        'Date': ['2024-01', '2024-02', '2024-03', '2024-04', '2024-05'],
-        'Jumlah_Peserta': [800, 820, 850, 880, 900],
-        'Total_Revenue': [1200000000, 1250000000, 1300000000, 1350000000, 1400000000],
-        'Avg_Harga': [1000000, 1050000, 1100000, 1150000, 1200000],
-        'Total_Referrals': [50, 55, 60, 65, 70],
-        'Jumlah_Peserta_roll_max3': [800, 820, 850, 880, 900],
-        'Jumlah_Peserta_roll_max6': [850, 870, 900, 920, 950],
-        'Total_Revenue_roll_max3': [1200000000, 1250000000, 1300000000, 1350000000, 1400000000],
-        'Total_Revenue_roll_max6': [1250000000, 1300000000, 1350000000, 1400000000, 1450000000],
-        'Revenue_per_User': [1500000, 1524000, 1529000, 1534000, 1556000],
-        'Completion_Revenue_Interaction': [0.85, 0.86, 0.87, 0.88, 0.89]
-    })
 
 # ============================================================================
 # HOME PAGE
@@ -206,12 +249,20 @@ if page == "🏠 Home":
         st.success("✅ Strong performance")
     
     st.markdown("---")
-    st.markdown("### 📥 Contoh Format CSV")
+    st.markdown("### 📥 Contoh Format CSV (25 bulan: 20 training + 5 testing)")
+    st.info("📊 Dataset sample ini mencakup **20 bulan data training** (Jan 2023 - Agu 2024) dan **5 bulan data testing** (Sep 2024 - Jan 2025)")
+    
     sample_df = get_sample_df()
-    st.dataframe(sample_df, use_container_width=True)
+    
+    # Show first 5, last 5 rows for preview
+    st.markdown("**Preview: 5 baris pertama dan 5 baris terakhir**")
+    preview_df = pd.concat([sample_df.head(5), sample_df.tail(5)])
+    st.dataframe(preview_df, use_container_width=True)
+    
+    st.markdown(f"**Total: {len(sample_df)} baris data** (Jan 2023 - Jan 2025)")
     
     csv = sample_df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download Sample CSV", data=csv, file_name="sample_labskill_data.csv", mime="text/csv")
+    st.download_button("📥 Download Sample CSV (25 bulan)", data=csv, file_name="sample_labskill_data_25months.csv", mime="text/csv")
 
 # ============================================================================
 # REVENUE & PESERTA PAGES (sama logikanya, hanya beda target)
@@ -327,7 +378,7 @@ def forecast_page(target_name, target_col, icon):
     )
     st.plotly_chart(fig, use_container_width=True)
     
-    # Tabel prediksi
+    # Tabel prediksi - FIXED: Format setiap kolom secara terpisah
     st.markdown("### 📋 Detail Prediksi")
     forecast_df = pd.DataFrame({
         'Bulan': future_months,
@@ -335,7 +386,15 @@ def forecast_page(target_name, target_col, icon):
         'Batas Bawah': [int(round(v / factor)) for v in forecast_values],
         'Batas Atas': [int(round(v * factor)) for v in forecast_values]
     })
-    st.dataframe(forecast_df.style.format('{:,}'), use_container_width=True, hide_index=True)
+    
+    # Format hanya kolom numerik
+    styled_df = forecast_df.style.format({
+        f'Prediksi {target_name}': '{:,}',
+        'Batas Bawah': '{:,}',
+        'Batas Atas': '{:,}'
+    })
+    
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
     
     csv_out = forecast_df.to_csv(index=False).encode('utf-8')
     st.download_button(
