@@ -1,5 +1,5 @@
 """
-LBSK Forecasting System - Streamlit App
+Labskill Forecasting System - Streamlit App
 """
 import streamlit as st
 import pandas as pd
@@ -298,43 +298,46 @@ def get_sample_df():
     return df
 
 # ============================================================================
-# SIDEBAR
+# NAVIGATION (NO SIDEBAR - USING TABS)
 # ============================================================================
-st.sidebar.title("🚀 LBSK Forecasting")
-st.sidebar.markdown("---")
-page = st.sidebar.radio("Navigation", ["🏠 Home", "💰 Revenue Forecast", "👥 Peserta Forecast"])
-st.sidebar.markdown("---")
-st.sidebar.info("""
-**Model Performance:**
-- Peserta: R² 0.9276 | MAPE 1.78%
-- Revenue: R² 0.9017 | MAPE 3.11%
+st.markdown('<h1 class="main-header">🚀 LBSK Forecasting System</h1>', unsafe_allow_html=True)
 
-**Periode Forecast:**
-- Short-term: 3-6 bulan (Akurasi tinggi)
-- Mid-term: 9-12 bulan (Rekomendasi)
-- Long-term: 18-24 bulan (Trend analysis)
-""")
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Format CSV yang dibutuhkan:**\n- Date (YYYY-MM)\n- Jumlah_Peserta\n- Total_Revenue\n- 8 kolom fitur (lihat sample)")
+# Tabs untuk navigation
+tab1, tab2, tab3 = st.tabs(["🏠 Home", "💰 Revenue Forecast", "👥 Peserta Forecast"])
 
 # ============================================================================
 # HOME PAGE
 # ============================================================================
-if page == "🏠 Home":
-    st.markdown('<h1 class="main-header">LBSK Forecasting System</h1>', unsafe_allow_html=True)
+with tab1:
     st.markdown('<p class="sub-header">Upload CSV untuk melihat historical data & prediksi hingga 24 bulan ke depan (2026)</p>', unsafe_allow_html=True)
     
+    # Model Performance Cards
+    st.markdown("### 📊 Model Performance")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("#### 👥 Model Peserta")
-        st.markdown("- R²: 0.9276\n- MAPE: 1.78%")
+        st.markdown("- **R²:** 0.9276\n- **MAPE:** 1.78%")
         st.success("✅ Excellent performance")
     with col2:
         st.markdown("#### 💰 Model Revenue")
-        st.markdown("- R²: 0.9017\n- MAPE: 3.11%")
+        st.markdown("- **R²:** 0.9017\n- **MAPE:** 3.11%")
         st.success("✅ Strong performance")
     
     st.markdown("---")
+    
+    # Forecast Period Info
+    st.markdown("### ⏱️ Periode Forecast")
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.info("**Short-term (3-6 bulan)**\n\nAkurasi tinggi ~95%")
+    with col_b:
+        st.info("**Mid-term (9-12 bulan)**\n\nAkurasi baik ~85%\n\n✅ Rekomendasi")
+    with col_c:
+        st.info("**Long-term (18-24 bulan)**\n\nTrend analysis ~70%")
+    
+    st.markdown("---")
+    
+    # Sample Data
     st.markdown("### 📥 Contoh Format CSV (25 bulan: 20 training + 5 testing)")
     st.info("📊 Dataset sample ini mencakup **20 bulan data training** (Jan 2023 - Agu 2024) dan **5 bulan data testing** (Sep 2024 - Jan 2025)")
     
@@ -347,6 +350,25 @@ if page == "🏠 Home":
     
     st.markdown(f"**Total: {len(sample_df)} baris data** (Jan 2023 - Jan 2025)")
     
+    # Required columns info
+    with st.expander("📋 Kolom yang Dibutuhkan"):
+        st.markdown("""
+        **Kolom Wajib:**
+        1. `Date` - Format YYYY-MM
+        2. `Jumlah_Peserta` - Total peserta
+        3. `Total_Revenue` - Total pendapatan (IDR)
+        
+        **Fitur Tambahan (8 kolom):**
+        4. `Avg_Harga` - Rata-rata harga
+        5. `Total_Referrals` - Total referral
+        6. `Jumlah_Peserta_roll_max3` - Rolling max 3 bulan peserta
+        7. `Jumlah_Peserta_roll_max6` - Rolling max 6 bulan peserta
+        8. `Total_Revenue_roll_max3` - Rolling max 3 bulan revenue
+        9. `Total_Revenue_roll_max6` - Rolling max 6 bulan revenue
+        10. `Revenue_per_User` - Revenue per user
+        11. `Completion_Revenue_Interaction` - Interaksi completion & revenue
+        """)
+    
     csv = sample_df.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Download Sample CSV (25 bulan)", data=csv, file_name="sample_labskill_data_25months.csv", mime="text/csv")
 
@@ -354,7 +376,6 @@ if page == "🏠 Home":
 # REVENUE & PESERTA PAGES (sama logikanya, hanya beda target)
 # ============================================================================
 def forecast_page(target_name, target_col, icon):
-    st.markdown(f'<h1 class="main-header">{icon} {target_name} Forecast</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Upload CSV untuk melihat data historis dan prediksi</p>', unsafe_allow_html=True)
     
     peserta_model, revenue_model, scaler_peserta, scaler_revenue, models_loaded = load_models()
@@ -515,9 +536,10 @@ def forecast_page(target_name, target_col, icon):
         )
 
 # ============================================================================
-# ROUTING
+# ROUTING - TABS BASED
 # ============================================================================
-if page == "💰 Revenue Forecast":
+with tab2:
     forecast_page("Revenue", "Total_Revenue", "💰")
-elif page == "👥 Peserta Forecast":
+
+with tab3:
     forecast_page("Peserta", "Jumlah_Peserta", "👥")
